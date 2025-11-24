@@ -1,0 +1,12 @@
+{
+  "name": "extrema",
+  "version": "1.0.0",
+  "description": "Projetos correlacionados ao desenvolvimento das ações profissionais do Dr. Caio V. em Extrema, MG.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "lint": "node scripts/lint.js",
+    "test": "npm run lint"
+  },
+  "license": "ISC"
+}
