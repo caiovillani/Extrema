@@ -1,0 +1,6 @@
+# Arquivos e pastas auxiliares
+.codex
+*.log
+
+# Ambiente
+.env
