@@ -1,2 +1,21 @@
 node_modules/
 npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Environment
+.env
+.env.*
+
+# Logs
+logs/*.jsonl
+
+# OS
+.DS_Store
+Thumbs.db

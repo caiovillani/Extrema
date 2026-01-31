@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "procurement-tools": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "tools.procurement_mcp_server"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "SOURCES_LOG": "${workspaceFolder}/sources/sources_log.jsonl",
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  }
+}
