@@ -6,11 +6,21 @@ Usage:
     python -m tools.procurement_mcp_server
 """
 
+import asyncio
 import json
+import logging
 import os
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+from tools.http_utils import CachedHTTPClient
+from tools.pncp_client import PNCPClient
+from tools.sinapi_client import SINAPIClient
+from tools.bps_client import BPSClient
+
+logger = logging.getLogger(__name__)
 
 
 class ProcurementTools:
@@ -18,7 +28,9 @@ class ProcurementTools:
 
     def __init__(self):
         self.sources_log_path = Path(
-            os.environ.get("SOURCES_LOG", "sources/sources_log.jsonl")
+            os.environ.get(
+                "SOURCES_LOG", "sources/sources_log.jsonl"
+            )
         )
         self.price_sources_path = Path(
             os.environ.get(
@@ -26,6 +38,18 @@ class ProcurementTools:
                 "sources/price_sources_log.jsonl",
             )
         )
+
+        # Shared HTTP client with retry + cache
+        self._http = CachedHTTPClient()
+
+        # Specialized clients
+        self.pncp = PNCPClient(http=self._http)
+        self.sinapi = SINAPIClient(
+            estado=os.environ.get("SINAPI_ESTADO", "MG"),
+            http=self._http,
+        )
+        self.bps = BPSClient(http=self._http)
+
         self._load_sources()
 
     def _load_sources(self):
@@ -65,7 +89,9 @@ class ProcurementTools:
         if source is None:
             return {
                 "valid": False,
-                "error": f"Fonte {source_id} nao encontrada no log",
+                "error": (
+                    f"Fonte {source_id} nao encontrada no log"
+                ),
             }
 
         if source.get("status") != "vigente":
@@ -79,8 +105,11 @@ class ProcurementTools:
 
         verificado_em = source.get("verificado_em")
         if verificado_em:
-            verificado_date = datetime.fromisoformat(verificado_em)
-            if datetime.now() - verificado_date > timedelta(days=180):
+            verificado_date = datetime.fromisoformat(
+                verificado_em
+            )
+            age = datetime.now() - verificado_date
+            if age > timedelta(days=180):
                 return {
                     "valid": True,
                     "warning": (
@@ -92,29 +121,44 @@ class ProcurementTools:
 
         return {"valid": True, "source": source}
 
-    def search_pncp(
+    async def search_pncp(
         self,
         termo: str,
         categoria: Optional[str] = None,
+        uf: Optional[str] = None,
         limite: int = 10,
     ) -> dict:
         """
-        Busca contratos no Portal Nacional de Contratacoes Publicas.
+        Busca contratos no Portal Nacional de Contratacoes.
 
         Args:
             termo: Termo de busca (descricao do objeto)
-            categoria: Categoria de contratacao (bens, servicos, obras)
+            categoria: Categoria de contratacao
+            uf: Filtro por UF
             limite: Numero maximo de resultados
 
         Returns:
             dict com resultados da busca
         """
         pncp_source = self.price_sources.get("PRC-001")
-        if not pncp_source or pncp_source.get("status") != "vigente":
+        if (
+            not pncp_source
+            or pncp_source.get("status") != "vigente"
+        ):
             return {
                 "success": False,
-                "error": "Fonte PNCP nao disponivel ou nao vigente",
+                "error": (
+                    "Fonte PNCP nao disponivel ou nao vigente"
+                ),
             }
+
+        result = await self.pncp.search_contratos(
+            termo=termo, uf=uf, limite=limite
+        )
+
+        contratos_dicts = []
+        for c in result.contratos:
+            contratos_dicts.append(asdict(c))
 
         return {
             "success": True,
@@ -122,19 +166,15 @@ class ProcurementTools:
                 "id": "PRC-001",
                 "nome": "PNCP",
                 "url": pncp_source.get("url"),
-                "consultado_em": datetime.now().isoformat(),
+                "consultado_em": result.data_consulta,
             },
             "termo_buscado": termo,
             "categoria": categoria,
-            "limite": limite,
-            "resultados": [],
-            "aviso": (
-                "Dados simulados - implementar integracao real com "
-                "API PNCP em https://pncp.gov.br/api/consulta/v1/"
-            ),
+            "total_resultados": result.total_resultados,
+            "resultados": contratos_dicts,
         }
 
-    def get_sinapi_price(
+    async def get_sinapi_price(
         self,
         codigo: str,
         estado: str = "MG",
@@ -152,13 +192,52 @@ class ProcurementTools:
             dict com preco e metadados
         """
         sinapi_source = self.price_sources.get("PRC-003")
-        if not sinapi_source or sinapi_source.get("status") != "vigente":
+        if (
+            not sinapi_source
+            or sinapi_source.get("status") != "vigente"
+        ):
             return {
                 "success": False,
-                "error": "Fonte SINAPI nao disponivel ou nao vigente",
+                "error": (
+                    "Fonte SINAPI nao disponivel ou nao vigente"
+                ),
             }
 
-        regime = "Desonerado" if desonerado else "Nao Desonerado"
+        # Ensure SINAPI data is loaded
+        if self.sinapi.estado != estado:
+            self.sinapi = SINAPIClient(
+                estado=estado, http=self._http
+            )
+        await self.sinapi.ensure_loaded()
+
+        comp = self.sinapi.get_composicao(
+            codigo, desonerado=desonerado
+        )
+
+        regime = (
+            "Desonerado" if desonerado else "Nao Desonerado"
+        )
+        if comp is None:
+            return {
+                "success": True,
+                "fonte": {
+                    "id": "PRC-003",
+                    "nome": "SINAPI",
+                    "referencia": f"SINAPI {estado} {regime}",
+                    "consultado_em": (
+                        datetime.now().isoformat()
+                    ),
+                },
+                "codigo": codigo,
+                "encontrado": False,
+                "mensagem": (
+                    f"Composicao {codigo} nao encontrada na "
+                    f"base SINAPI {estado}. Verifique o codigo "
+                    f"ou coloque o CSV mais recente em "
+                    f"data/sinapi/{estado.lower()}/."
+                ),
+            }
+
         return {
             "success": True,
             "fonte": {
@@ -168,19 +247,51 @@ class ProcurementTools:
                 "consultado_em": datetime.now().isoformat(),
             },
             "codigo": codigo,
-            "estado": estado,
-            "preco": {
-                "valor": 0.0,
-                "unidade": "UN",
-                "referencia_mes": datetime.now().strftime("%Y-%m"),
-            },
-            "aviso": (
-                "Dados simulados - implementar integracao real com "
-                "base SINAPI da Caixa"
-            ),
+            "encontrado": True,
+            "composicao": asdict(comp),
         }
 
-    def get_bps_price(
+    async def search_sinapi(
+        self,
+        termo: str,
+        estado: str = "MG",
+        desonerado: bool = False,
+        limite: int = 10,
+    ) -> dict:
+        """
+        Busca composicoes SINAPI por descricao.
+
+        Args:
+            termo: Texto para busca na descricao
+            estado: UF de referencia
+            desonerado: Se True, tabela desonerada
+            limite: Maximo de resultados
+
+        Returns:
+            dict com composicoes encontradas
+        """
+        if self.sinapi.estado != estado:
+            self.sinapi = SINAPIClient(
+                estado=estado, http=self._http
+            )
+        await self.sinapi.ensure_loaded()
+
+        comps = self.sinapi.search_composicoes(
+            termo, desonerado=desonerado, limite=limite
+        )
+
+        return {
+            "success": True,
+            "fonte": {
+                "id": "PRC-003",
+                "nome": "SINAPI",
+                "consultado_em": datetime.now().isoformat(),
+            },
+            "termo_buscado": termo,
+            "resultados": [asdict(c) for c in comps],
+        }
+
+    async def get_bps_price(
         self,
         medicamento: str,
         apresentacao: Optional[str] = None,
@@ -190,16 +301,45 @@ class ProcurementTools:
 
         Args:
             medicamento: Nome ou codigo do medicamento
-            apresentacao: Forma de apresentacao (opcional)
+            apresentacao: Forma de apresentacao
 
         Returns:
             dict com preco e metadados
         """
         bps_source = self.price_sources.get("PRC-004")
-        if not bps_source or bps_source.get("status") != "vigente":
+        if (
+            not bps_source
+            or bps_source.get("status") != "vigente"
+        ):
             return {
                 "success": False,
-                "error": "Fonte BPS nao disponivel ou nao vigente",
+                "error": (
+                    "Fonte BPS nao disponivel ou nao vigente"
+                ),
+            }
+
+        resumo = self.bps.search_bps(
+            medicamento, apresentacao=apresentacao
+        )
+
+        if resumo is None:
+            return {
+                "success": True,
+                "fonte": {
+                    "id": "PRC-004",
+                    "nome": "Banco de Precos em Saude",
+                    "consultado_em": (
+                        datetime.now().isoformat()
+                    ),
+                },
+                "medicamento": medicamento,
+                "apresentacao": apresentacao,
+                "encontrado": False,
+                "mensagem": (
+                    f"Nenhum registro encontrado para "
+                    f"'{medicamento}' no BPS. Exporte dados "
+                    f"do portal BPS e coloque em data/bps/."
+                ),
             }
 
         return {
@@ -211,26 +351,17 @@ class ProcurementTools:
             },
             "medicamento": medicamento,
             "apresentacao": apresentacao,
-            "precos": {
-                "media": 0.0,
-                "mediana": 0.0,
-                "minimo": 0.0,
-                "maximo": 0.0,
-                "n_registros": 0,
-            },
-            "aviso": (
-                "Dados simulados - implementar integracao real com "
-                "BPS em https://bps.saude.gov.br/"
-            ),
+            "encontrado": True,
+            "precos": asdict(resumo),
         }
 
-    def check_cmed_ceiling(
+    async def check_cmed_ceiling(
         self,
         medicamento: str,
         preco_proposto: float,
     ) -> dict:
         """
-        Verifica se preco proposto esta dentro do teto CMED.
+        Verifica se preco esta dentro do teto CMED.
 
         Args:
             medicamento: Nome ou codigo do medicamento
@@ -240,13 +371,23 @@ class ProcurementTools:
             dict com resultado da verificacao
         """
         cmed_source = self.price_sources.get("PRC-005")
-        if not cmed_source or cmed_source.get("status") != "vigente":
+        if (
+            not cmed_source
+            or cmed_source.get("status") != "vigente"
+        ):
             return {
                 "success": False,
-                "error": "Fonte CMED nao disponivel ou nao vigente",
+                "error": (
+                    "Fonte CMED nao disponivel ou nao vigente"
+                ),
             }
 
-        teto_cmed = 0.0  # Buscar valor real da tabela CMED
+        # Ensure CMED data is loaded
+        await self.bps.ensure_cmed_loaded()
+
+        resultado = self.bps.verificar_teto(
+            medicamento, preco_proposto
+        )
 
         return {
             "success": True,
@@ -257,17 +398,10 @@ class ProcurementTools:
             },
             "medicamento": medicamento,
             "preco_proposto": preco_proposto,
-            "teto_cmed": teto_cmed,
-            "dentro_do_teto": (
-                preco_proposto <= teto_cmed if teto_cmed > 0 else None
-            ),
-            "aviso": (
-                "Dados simulados - implementar integracao real com "
-                "tabela CMED/ANVISA"
-            ),
+            **resultado,
         }
 
-    def get_anp_price(
+    async def get_anp_price(
         self,
         combustivel: str,
         municipio: str = "EXTREMA",
@@ -276,8 +410,11 @@ class ProcurementTools:
         """
         Consulta preco de combustivel na ANP.
 
+        A ANP publica levantamentos semanais de precos por
+        municipio. Este metodo consulta a API de dados abertos.
+
         Args:
-            combustivel: Tipo de combustivel (gasolina, diesel, etanol)
+            combustivel: Tipo (gasolina, diesel, etanol)
             municipio: Nome do municipio
             estado: UF
 
@@ -285,12 +422,73 @@ class ProcurementTools:
             dict com preco e metadados
         """
         anp_source = self.price_sources.get("PRC-007")
-        if not anp_source or anp_source.get("status") != "vigente":
+        if (
+            not anp_source
+            or anp_source.get("status") != "vigente"
+        ):
             return {
                 "success": False,
-                "error": "Fonte ANP nao disponivel ou nao vigente",
+                "error": (
+                    "Fonte ANP nao disponivel ou nao vigente"
+                ),
             }
 
+        # ANP dados abertos endpoint
+        anp_api = (
+            "https://www.gov.br/anp/pt-br/assuntos/"
+            "precos-e-defesa-da-concorrencia/precos/"
+            "levantamento-de-precos/consulta-de-precos-"
+            "recebidos-pelos-agentes-consumidores"
+        )
+
+        try:
+            data = await self._http.get_json(
+                anp_api,
+                params={
+                    "combustivel": combustivel,
+                    "municipio": municipio,
+                    "estado": estado,
+                },
+                cache_ttl=3600,
+            )
+            if isinstance(data, dict) and data.get(
+                "resultado"
+            ):
+                items = data["resultado"]
+                precos = [
+                    float(i.get("preco", 0))
+                    for i in items
+                    if i.get("preco")
+                ]
+                if precos:
+                    return {
+                        "success": True,
+                        "fonte": {
+                            "id": "PRC-007",
+                            "nome": "ANP",
+                            "consultado_em": (
+                                datetime.now().isoformat()
+                            ),
+                        },
+                        "combustivel": combustivel,
+                        "municipio": municipio,
+                        "estado": estado,
+                        "preco": {
+                            "media": round(
+                                sum(precos) / len(precos), 3
+                            ),
+                            "minimo": round(min(precos), 3),
+                            "maximo": round(max(precos), 3),
+                            "n_postos": len(precos),
+                            "data_coleta": items[0].get(
+                                "data", ""
+                            ),
+                        },
+                    }
+        except Exception as exc:
+            logger.warning("ANP query failed: %s", exc)
+
+        # Fallback
         return {
             "success": True,
             "fonte": {
@@ -301,17 +499,18 @@ class ProcurementTools:
             "combustivel": combustivel,
             "municipio": municipio,
             "estado": estado,
-            "preco": {
-                "media": 0.0,
-                "minimo": 0.0,
-                "maximo": 0.0,
-                "data_coleta": None,
-            },
-            "aviso": (
-                "Dados simulados - implementar integracao real com "
-                "levantamento de precos ANP"
+            "encontrado": False,
+            "mensagem": (
+                f"Nao foi possivel obter precos ANP para "
+                f"{combustivel} em {municipio}/{estado}. "
+                f"Consulte o levantamento semanal em "
+                f"gov.br/anp."
             ),
         }
+
+    async def close(self):
+        """Cleanup HTTP client resources."""
+        await self._http.close()
 
 
 def main():
@@ -321,21 +520,39 @@ def main():
     print("MCP Server procurement-tools iniciado")
     print(f"Sources log: {tools.sources_log_path}")
     print(f"Price sources log: {tools.price_sources_path}")
-    print(f"Fontes normativas carregadas: {len(tools.sources)}")
-    print(f"Fontes de precos carregadas: {len(tools.price_sources)}")
+    print(
+        f"Fontes normativas carregadas: "
+        f"{len(tools.sources)}"
+    )
+    print(
+        f"Fontes de precos carregadas: "
+        f"{len(tools.price_sources)}"
+    )
     print()
     print("Tools disponiveis:")
     print("  - validate_source(source_id)")
-    print("  - search_pncp(termo, categoria, limite)")
-    print("  - get_sinapi_price(codigo, estado, desonerado)")
+    print("  - search_pncp(termo, categoria, uf, limite)")
+    print(
+        "  - get_sinapi_price(codigo, estado, desonerado)"
+    )
+    print(
+        "  - search_sinapi(termo, estado, desonerado, limite)"
+    )
     print("  - get_bps_price(medicamento, apresentacao)")
-    print("  - check_cmed_ceiling(medicamento, preco_proposto)")
-    print("  - get_anp_price(combustivel, municipio, estado)")
+    print(
+        "  - check_cmed_ceiling(medicamento, preco_proposto)"
+    )
+    print(
+        "  - get_anp_price(combustivel, municipio, estado)"
+    )
     print()
     print(
-        "NOTA: Todas as ferramentas retornam dados simulados. "
-        "Implementar integracoes reais com as APIs oficiais para "
-        "uso em producao."
+        "Clientes integrados: PNCP (API), SINAPI (CSV/XLS), "
+        "BPS (CSV), CMED (CSV/XLS), ANP (dados abertos)."
+    )
+    print(
+        "Para dados SINAPI/BPS/CMED, coloque arquivos em "
+        "data/sinapi/, data/bps/, data/cmed/."
     )
 
 
