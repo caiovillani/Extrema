@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read(sources/**)",
+      "Read(.claude/skills/**)",
+      "Read(output/**)",
+      "Write(output/**)",
+      "Bash(python .claude/hooks/*.py)",
+      "Bash(python tools/*.py)"
+    ],
+    "deny": [
+      "Write(.env*)",
+      "Write(sources/**)",
+      "Write(.claude/**)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": {
+          "tool_name": "Write",
+          "file_path": "output/**/*.etp.md"
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/validate_document.py --type etp"
+          },
+          {
+            "type": "prompt",
+            "message": "Documento ETP pronto para salvamento. Deseja revisar antes de confirmar?"
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "tool_name": "Write",
+          "file_path": "output/**/*.tr.md"
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/validate_document.py --type tr"
+          },
+          {
+            "type": "prompt",
+            "message": "Documento TR pronto para salvamento. Deseja revisar antes de confirmar?"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": {
+          "tool_name": "Write"
+        },
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/check_citation.py --file $FILE_PATH"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_PROJECT_DIR": "${workspaceFolder}",
+    "SOURCES_LOG": "${workspaceFolder}/sources/sources_log.jsonl",
+    "PRICE_SOURCES_LOG": "${workspaceFolder}/sources/price_sources_log.jsonl",
+    "OUTPUT_DIR": "${workspaceFolder}/output"
+  }
+}

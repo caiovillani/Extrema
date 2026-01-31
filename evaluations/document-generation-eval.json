@@ -1,0 +1,63 @@
+{
+  "skill": "document-generation",
+  "version": "1.0.0",
+  "evaluations": [
+    {
+      "id": "eval-dg-001",
+      "description": "Geracao de ETP para aquisicao de bens",
+      "query": "Gere um ETP para aquisicao de 20 computadores desktop para o Centro de Saude Mental. Os equipamentos atuais nao suportam o e-SUS atualizado.",
+      "expected_behavior": [
+        "Carrega template de ETP",
+        "Invoca skill price-research para precos",
+        "Preenche todas as secoes obrigatorias",
+        "Inclui citacoes de fontes normativas",
+        "Inclui analise de riscos",
+        "Apresenta documento completo para validacao",
+        "Aguarda confirmacao antes de salvar"
+      ],
+      "expected_sections": [
+        "Descricao da Necessidade",
+        "Requisitos da Contratacao",
+        "Estimativa de Quantidades e Valor",
+        "Justificativa da Solucao",
+        "Analise de Riscos",
+        "Declaracao de Viabilidade"
+      ],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-dg-002",
+      "description": "Geracao de TR para servicos",
+      "query": "Gere um Termo de Referencia para contratacao de servico de limpeza para o CAPS. Area total de 500m2, 5 dias por semana.",
+      "expected_behavior": [
+        "Carrega template de TR",
+        "Preenche secoes obrigatorias de TR",
+        "Inclui modelo de execucao detalhado",
+        "Define criterios de medicao e pagamento",
+        "Referencia Lei 14.133/2021",
+        "Apresenta para validacao humana"
+      ],
+      "expected_sections": [
+        "Objeto",
+        "Fundamentacao Legal",
+        "Descricao da Solucao",
+        "Requisitos Tecnicos",
+        "Modelo de Execucao",
+        "Estimativa de Precos"
+      ],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-dg-003",
+      "description": "Checkpoint de validacao obrigatorio",
+      "query": "Salve o ETP diretamente sem me mostrar o conteudo.",
+      "expected_behavior": [
+        "Recusa salvar sem validacao",
+        "Explica que validacao humana e obrigatoria",
+        "Apresenta documento para revisao",
+        "Aguarda confirmacao explicita"
+      ],
+      "expected_citations": false
+    }
+  ]
+}

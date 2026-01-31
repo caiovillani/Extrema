@@ -1,0 +1,78 @@
+{
+  "skill": "price-research",
+  "version": "1.0.0",
+  "evaluations": [
+    {
+      "id": "eval-pr-001",
+      "description": "Pesquisa basica de precos para bens comuns",
+      "query": "Preciso pesquisar precos de computadores desktop para licitacao. Sao 50 unidades para o CAPS.",
+      "expected_behavior": [
+        "Identifica categoria como 'bens comuns'",
+        "Consulta PNCP para precos praticados",
+        "Consulta Compras.gov para atas vigentes",
+        "Busca pelo menos 3 fontes comparaveis",
+        "Apresenta tabela com fontes, precos e datas",
+        "Solicita validacao antes de prosseguir"
+      ],
+      "expected_sources": ["PRC-001", "PRC-002"],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-pr-002",
+      "description": "Pesquisa de precos para medicamentos com teto CMED",
+      "query": "Preciso de precos para Risperidona 2mg para o CAPS. Sao 5000 comprimidos.",
+      "expected_behavior": [
+        "Identifica categoria como 'saude - medicamentos'",
+        "Consulta BPS para precos praticados",
+        "Consulta CMED para teto de preco",
+        "Verifica se medicamento e controlado",
+        "Alerta se preco de mercado excede CMED",
+        "Usa CMED como teto se necessario"
+      ],
+      "expected_sources": ["PRC-004", "PRC-005"],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-pr-003",
+      "description": "Pesquisa de precos para obras com SINAPI e BDI",
+      "query": "Preciso orcar reforma de 200m2 no Centro de Saude Mental. Inclui pintura, piso e eletrica basica.",
+      "expected_behavior": [
+        "Identifica categoria como 'obras/engenharia'",
+        "Consulta SINAPI MG para composicoes",
+        "Aplica BDI conforme faixa TCU para reformas",
+        "Cita Acordao TCU 2622/2013",
+        "Apresenta composicoes detalhadas",
+        "Solicita validacao de BDI aplicado"
+      ],
+      "expected_sources": ["PRC-003", "PRC-006"],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-pr-004",
+      "description": "Pesquisa de precos para combustivel",
+      "query": "Preciso pesquisar precos de gasolina e diesel para a frota da Secretaria de Saude.",
+      "expected_behavior": [
+        "Identifica categoria como 'combustiveis'",
+        "Consulta ANP para precos do municipio de Extrema ou regiao",
+        "Apresenta media das ultimas semanas",
+        "Complementa com PNCP se necessario"
+      ],
+      "expected_sources": ["PRC-007"],
+      "expected_citations": true
+    },
+    {
+      "id": "eval-pr-005",
+      "description": "Pesquisa com fontes insuficientes",
+      "query": "Preciso pesquisar precos de um equipamento medico muito especializado: eletroencefalografo digital de 32 canais.",
+      "expected_behavior": [
+        "Tenta buscar no PNCP e Compras.gov",
+        "Reconhece dificuldade em obter 3 fontes",
+        "Sugere alternativas (cotacao direta, municipios similares)",
+        "Alerta sobre limitacao de fontes",
+        "Documenta justificativa"
+      ],
+      "expected_sources": ["PRC-001", "PRC-002"],
+      "expected_citations": true
+    }
+  ]
+}
