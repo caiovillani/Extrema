@@ -42,11 +42,5 @@
         ]
       }
     ]
-  },
-  "env": {
-    "CLAUDE_PROJECT_DIR": "${workspaceFolder}",
-    "SOURCES_LOG": "${workspaceFolder}/sources/sources_log.jsonl",
-    "PRICE_SOURCES_LOG": "${workspaceFolder}/sources/price_sources_log.jsonl",
-    "OUTPUT_DIR": "${workspaceFolder}/output"
   }
 }
