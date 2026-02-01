@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from mcp.server.fastmcp import FastMCP
+
 from tools.http_utils import CachedHTTPClient
 from tools.pncp_client import PNCPClient
 from tools.sinapi_client import SINAPIClient
@@ -513,47 +515,138 @@ class ProcurementTools:
         await self._http.close()
 
 
-def main():
-    """Inicia o MCP server."""
-    tools = ProcurementTools()
+def create_mcp_server() -> FastMCP:
+    """Create and configure the MCP server with all tools."""
+    server = FastMCP("procurement-tools")
+    _tools = ProcurementTools()
 
-    print("MCP Server procurement-tools iniciado")
-    print(f"Sources log: {tools.sources_log_path}")
-    print(f"Price sources log: {tools.price_sources_path}")
-    print(
-        f"Fontes normativas carregadas: "
-        f"{len(tools.sources)}"
-    )
-    print(
-        f"Fontes de precos carregadas: "
-        f"{len(tools.price_sources)}"
-    )
-    print()
-    print("Tools disponiveis:")
-    print("  - validate_source(source_id)")
-    print("  - search_pncp(termo, categoria, uf, limite)")
-    print(
-        "  - get_sinapi_price(codigo, estado, desonerado)"
-    )
-    print(
-        "  - search_sinapi(termo, estado, desonerado, limite)"
-    )
-    print("  - get_bps_price(medicamento, apresentacao)")
-    print(
-        "  - check_cmed_ceiling(medicamento, preco_proposto)"
-    )
-    print(
-        "  - get_anp_price(combustivel, municipio, estado)"
-    )
-    print()
-    print(
-        "Clientes integrados: PNCP (API), SINAPI (CSV/XLS), "
-        "BPS (CSV), CMED (CSV/XLS), ANP (dados abertos)."
-    )
-    print(
-        "Para dados SINAPI/BPS/CMED, coloque arquivos em "
-        "data/sinapi/, data/bps/, data/cmed/."
-    )
+    @server.tool()
+    def validate_source(source_id: str) -> dict:
+        """Valida se uma fonte normativa esta vigente.
+
+        Args:
+            source_id: ID da fonte (ex: BR-FED-0001)
+        """
+        return _tools.validate_source(source_id)
+
+    @server.tool()
+    async def search_pncp(
+        termo: str,
+        categoria: str = "",
+        uf: str = "",
+        limite: int = 10,
+    ) -> dict:
+        """Busca contratos no Portal Nacional de Contratacoes.
+
+        Args:
+            termo: Termo de busca (descricao do objeto)
+            categoria: Categoria de contratacao
+            uf: Filtro por UF
+            limite: Numero maximo de resultados
+        """
+        return await _tools.search_pncp(
+            termo,
+            categoria=categoria or None,
+            uf=uf or None,
+            limite=limite,
+        )
+
+    @server.tool()
+    async def get_sinapi_price(
+        codigo: str,
+        estado: str = "MG",
+        desonerado: bool = False,
+    ) -> dict:
+        """Consulta preco de composicao SINAPI.
+
+        Args:
+            codigo: Codigo SINAPI (ex: 87529)
+            estado: UF para referencia de precos
+            desonerado: Se deve usar tabela desonerada
+        """
+        return await _tools.get_sinapi_price(
+            codigo, estado=estado, desonerado=desonerado
+        )
+
+    @server.tool()
+    async def search_sinapi(
+        termo: str,
+        estado: str = "MG",
+        desonerado: bool = False,
+        limite: int = 10,
+    ) -> dict:
+        """Busca composicoes SINAPI por descricao.
+
+        Args:
+            termo: Texto para busca
+            estado: UF de referencia
+            desonerado: Se True, tabela desonerada
+            limite: Maximo de resultados
+        """
+        return await _tools.search_sinapi(
+            termo,
+            estado=estado,
+            desonerado=desonerado,
+            limite=limite,
+        )
+
+    @server.tool()
+    async def get_bps_price(
+        medicamento: str,
+        apresentacao: str = "",
+    ) -> dict:
+        """Consulta preco no Banco de Precos em Saude.
+
+        Args:
+            medicamento: Nome ou codigo do medicamento
+            apresentacao: Forma de apresentacao
+        """
+        return await _tools.get_bps_price(
+            medicamento,
+            apresentacao=apresentacao or None,
+        )
+
+    @server.tool()
+    async def check_cmed_ceiling(
+        medicamento: str,
+        preco_proposto: float,
+    ) -> dict:
+        """Verifica se preco esta dentro do teto CMED.
+
+        Args:
+            medicamento: Nome ou codigo do medicamento
+            preco_proposto: Preco a ser verificado
+        """
+        return await _tools.check_cmed_ceiling(
+            medicamento, preco_proposto
+        )
+
+    @server.tool()
+    async def get_anp_price(
+        combustivel: str,
+        municipio: str = "EXTREMA",
+        estado: str = "MG",
+    ) -> dict:
+        """Consulta preco de combustivel na ANP.
+
+        Args:
+            combustivel: Tipo (gasolina, diesel, etanol)
+            municipio: Nome do municipio
+            estado: UF
+        """
+        return await _tools.get_anp_price(
+            combustivel,
+            municipio=municipio,
+            estado=estado,
+        )
+
+    return server
+
+
+def main():
+    """Inicia o MCP server via stdio."""
+    server = create_mcp_server()
+    server.run(transport="stdio")
 
 
 if __name__ == "__main__":
