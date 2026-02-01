@@ -30,12 +30,12 @@ class ProcurementTools:
 
     def __init__(self):
         self.sources_log_path = Path(
-            os.environ.get(
+            self._resolve_env(
                 "SOURCES_LOG", "sources/sources_log.jsonl"
             )
         )
         self.price_sources_path = Path(
-            os.environ.get(
+            self._resolve_env(
                 "PRICE_SOURCES_LOG",
                 "sources/price_sources_log.jsonl",
             )
@@ -53,6 +53,14 @@ class ProcurementTools:
         self.bps = BPSClient(http=self._http)
 
         self._load_sources()
+
+    @staticmethod
+    def _resolve_env(key: str, default: str) -> str:
+        """Read env var, falling back to default if unset or unresolved."""
+        val = os.environ.get(key, default)
+        if "${" in val:
+            return default
+        return val
 
     def _load_sources(self):
         """Carrega fontes validas do log."""
