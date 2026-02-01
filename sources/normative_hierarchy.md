@@ -51,8 +51,13 @@
 
 ### Nivel 8: Legislacao Municipal Extrema
 
-- Leis e decretos municipais de Extrema regulamentando a Lei 14.133/2021
-  no ambito local
+- Decreto Municipal -- Regulamentacao da Lei 14.133/2021 no municipio
+  (MG-EXT-0001)
+- Plano Municipal de Saude 2022-2025 -- metas e acoes para RAPS e
+  atencao basica (MG-EXT-0002)
+- Decreto Municipal -- Sistema de Registro de Precos (MG-EXT-0003)
+- Decreto Municipal -- Contratacao Direta: dispensa e inexigibilidade
+  (MG-EXT-0004)
 
 ## Regras de Resolucao de Conflitos
 
