@@ -142,19 +142,23 @@ class PDFProcessor:
         return h.hexdigest()[:16]
 
     def _resolve_path(self, filepath: str) -> Path:
-        """Resolve a filepath, checking docs_dir if relative."""
-        p = Path(filepath)
-        if p.is_absolute() and p.exists():
-            return p
-        candidate = self.docs_dir / filepath
-        if candidate.exists():
-            return candidate
-        if p.exists():
-            return p
-        raise FileNotFoundError(
-            f"PDF not found: {filepath} "
-            f"(also checked {candidate})"
-        )
+        """Resolve a filepath within docs_dir only.
+
+        Rejects absolute paths and traversals that escape the
+        docs directory to prevent unauthorized file access.
+        """
+        docs_root = self.docs_dir.resolve()
+        candidate = (docs_root / filepath).resolve()
+        if not candidate.is_relative_to(docs_root):
+            raise ValueError(
+                f"Path escapes docs directory: {filepath}"
+            )
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"PDF not found: {filepath} "
+                f"(looked in {docs_root})"
+            )
+        return candidate
 
     def list_pdfs(self) -> list[dict]:
         """List all PDF files in the docs directory."""
