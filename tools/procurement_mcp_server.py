@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,8 @@ from tools.http_utils import CachedHTTPClient
 from tools.pncp_client import PNCPClient
 from tools.sinapi_client import SINAPIClient
 from tools.bps_client import BPSClient
+from tools.anp_client import ANPClient
+from tools.sicro_client import SICROClient
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,15 @@ class ProcurementTools:
             http=self._http,
         )
         self.bps = BPSClient(http=self._http)
+        self.anp = ANPClient(
+            municipio=os.environ.get("ANP_MUNICIPIO", "EXTREMA"),
+            estado=os.environ.get("ANP_ESTADO", "MG"),
+            http=self._http,
+        )
+        self.sicro = SICROClient(
+            estado=os.environ.get("SICRO_ESTADO", "MG"),
+            http=self._http,
+        )
 
         self._load_sources()
 
@@ -420,9 +432,6 @@ class ProcurementTools:
         """
         Consulta preco de combustivel na ANP.
 
-        A ANP publica levantamentos semanais de precos por
-        municipio. Este metodo consulta a API de dados abertos.
-
         Args:
             combustivel: Tipo (gasolina, diesel, etanol)
             municipio: Nome do municipio
@@ -443,62 +452,42 @@ class ProcurementTools:
                 ),
             }
 
-        # ANP dados abertos endpoint
-        anp_api = (
-            "https://www.gov.br/anp/pt-br/assuntos/"
-            "precos-e-defesa-da-concorrencia/precos/"
-            "levantamento-de-precos/consulta-de-precos-"
-            "recebidos-pelos-agentes-consumidores"
-        )
-
-        try:
-            data = await self._http.get_json(
-                anp_api,
-                params={
-                    "combustivel": combustivel,
-                    "municipio": municipio,
-                    "estado": estado,
-                },
-                cache_ttl=3600,
+        # Ensure ANP data is loaded
+        if (
+            self.anp.municipio != municipio.upper()
+            or self.anp.estado != estado.upper()
+        ):
+            self.anp = ANPClient(
+                municipio=municipio,
+                estado=estado,
+                http=self._http,
             )
-            if isinstance(data, dict) and data.get(
-                "resultado"
-            ):
-                items = data["resultado"]
-                precos = [
-                    float(i.get("preco", 0))
-                    for i in items
-                    if i.get("preco")
-                ]
-                if precos:
-                    return {
-                        "success": True,
-                        "fonte": {
-                            "id": "PRC-007",
-                            "nome": "ANP",
-                            "consultado_em": (
-                                datetime.now().isoformat()
-                            ),
-                        },
-                        "combustivel": combustivel,
-                        "municipio": municipio,
-                        "estado": estado,
-                        "preco": {
-                            "media": round(
-                                sum(precos) / len(precos), 3
-                            ),
-                            "minimo": round(min(precos), 3),
-                            "maximo": round(max(precos), 3),
-                            "n_postos": len(precos),
-                            "data_coleta": items[0].get(
-                                "data", ""
-                            ),
-                        },
-                    }
-        except Exception as exc:
-            logger.warning("ANP query failed: %s", exc)
+        await self.anp.ensure_loaded()
 
-        # Fallback
+        resumo = self.anp.get_precos(combustivel, municipio)
+
+        if resumo is None:
+            return {
+                "success": True,
+                "fonte": {
+                    "id": "PRC-007",
+                    "nome": "ANP",
+                    "consultado_em": (
+                        datetime.now().isoformat()
+                    ),
+                },
+                "combustivel": combustivel,
+                "municipio": municipio,
+                "estado": estado,
+                "encontrado": False,
+                "mensagem": (
+                    f"Nao foi possivel obter precos ANP para "
+                    f"{combustivel} em {municipio}/{estado}. "
+                    f"Coloque CSVs semanais em data/anp/ ou "
+                    f"consulte gov.br/anp."
+                ),
+            }
+
         return {
             "success": True,
             "fonte": {
@@ -509,13 +498,120 @@ class ProcurementTools:
             "combustivel": combustivel,
             "municipio": municipio,
             "estado": estado,
-            "encontrado": False,
-            "mensagem": (
-                f"Nao foi possivel obter precos ANP para "
-                f"{combustivel} em {municipio}/{estado}. "
-                f"Consulte o levantamento semanal em "
-                f"gov.br/anp."
-            ),
+            "preco": {
+                "media": resumo.media,
+                "minimo": resumo.minimo,
+                "maximo": resumo.maximo,
+                "n_postos": resumo.n_postos,
+                "data_coleta": resumo.data_coleta,
+            },
+        }
+
+    async def get_sicro_price(
+        self,
+        codigo: str,
+        estado: str = "MG",
+    ) -> dict:
+        """
+        Consulta composicao SICRO por codigo.
+
+        Args:
+            codigo: Codigo SICRO da composicao
+            estado: UF para referencia de precos
+
+        Returns:
+            dict com preco e metadados
+        """
+        sicro_source = self.price_sources.get("PRC-006")
+        if (
+            not sicro_source
+            or sicro_source.get("status") != "vigente"
+        ):
+            return {
+                "success": False,
+                "error": (
+                    "Fonte SICRO nao disponivel ou nao vigente"
+                ),
+            }
+
+        if self.sicro.estado != estado:
+            self.sicro = SICROClient(
+                estado=estado, http=self._http
+            )
+        await self.sicro.ensure_loaded()
+
+        comp = self.sicro.get_composicao(codigo)
+
+        if comp is None:
+            return {
+                "success": True,
+                "fonte": {
+                    "id": "PRC-006",
+                    "nome": "SICRO",
+                    "referencia": f"SICRO {estado}",
+                    "consultado_em": (
+                        datetime.now().isoformat()
+                    ),
+                },
+                "codigo": codigo,
+                "encontrado": False,
+                "mensagem": (
+                    f"Composicao {codigo} nao encontrada na "
+                    f"base SICRO {estado}. Verifique o codigo "
+                    f"ou coloque o CSV mais recente em "
+                    f"data/sicro/{estado.lower()}/."
+                ),
+            }
+
+        return {
+            "success": True,
+            "fonte": {
+                "id": "PRC-006",
+                "nome": "SICRO",
+                "referencia": f"SICRO {estado}",
+                "consultado_em": datetime.now().isoformat(),
+            },
+            "codigo": codigo,
+            "encontrado": True,
+            "composicao": asdict(comp),
+        }
+
+    async def search_sicro(
+        self,
+        termo: str,
+        estado: str = "MG",
+        limite: int = 10,
+    ) -> dict:
+        """
+        Busca composicoes SICRO por descricao.
+
+        Args:
+            termo: Texto para busca na descricao
+            estado: UF de referencia
+            limite: Maximo de resultados
+
+        Returns:
+            dict com composicoes encontradas
+        """
+        if self.sicro.estado != estado:
+            self.sicro = SICROClient(
+                estado=estado, http=self._http
+            )
+        await self.sicro.ensure_loaded()
+
+        comps = self.sicro.search_composicoes(
+            termo, limite=limite
+        )
+
+        return {
+            "success": True,
+            "fonte": {
+                "id": "PRC-006",
+                "nome": "SICRO",
+                "consultado_em": datetime.now().isoformat(),
+            },
+            "termo_buscado": termo,
+            "resultados": [asdict(c) for c in comps],
         }
 
     async def close(self):
@@ -525,6 +621,8 @@ class ProcurementTools:
 
 def create_mcp_server() -> FastMCP:
     """Create and configure the MCP server with all tools."""
+    from tools.logging_config import audit_log
+
     server = FastMCP("procurement-tools")
     _tools = ProcurementTools()
 
@@ -535,7 +633,15 @@ def create_mcp_server() -> FastMCP:
         Args:
             source_id: ID da fonte (ex: BR-FED-0001)
         """
-        return _tools.validate_source(source_id)
+        start = time.time()
+        result = _tools.validate_source(source_id)
+        audit_log(
+            "validate_source",
+            {"source_id": source_id},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def search_pncp(
@@ -552,12 +658,20 @@ def create_mcp_server() -> FastMCP:
             uf: Filtro por UF
             limite: Numero maximo de resultados
         """
-        return await _tools.search_pncp(
+        start = time.time()
+        result = await _tools.search_pncp(
             termo,
             categoria=categoria or None,
             uf=uf or None,
             limite=limite,
         )
+        audit_log(
+            "search_pncp",
+            {"termo": termo, "uf": uf, "limite": limite},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def get_sinapi_price(
@@ -572,9 +686,17 @@ def create_mcp_server() -> FastMCP:
             estado: UF para referencia de precos
             desonerado: Se deve usar tabela desonerada
         """
-        return await _tools.get_sinapi_price(
+        start = time.time()
+        result = await _tools.get_sinapi_price(
             codigo, estado=estado, desonerado=desonerado
         )
+        audit_log(
+            "get_sinapi_price",
+            {"codigo": codigo, "estado": estado},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def search_sinapi(
@@ -591,12 +713,20 @@ def create_mcp_server() -> FastMCP:
             desonerado: Se True, tabela desonerada
             limite: Maximo de resultados
         """
-        return await _tools.search_sinapi(
+        start = time.time()
+        result = await _tools.search_sinapi(
             termo,
             estado=estado,
             desonerado=desonerado,
             limite=limite,
         )
+        audit_log(
+            "search_sinapi",
+            {"termo": termo, "estado": estado},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def get_bps_price(
@@ -609,10 +739,18 @@ def create_mcp_server() -> FastMCP:
             medicamento: Nome ou codigo do medicamento
             apresentacao: Forma de apresentacao
         """
-        return await _tools.get_bps_price(
+        start = time.time()
+        result = await _tools.get_bps_price(
             medicamento,
             apresentacao=apresentacao or None,
         )
+        audit_log(
+            "get_bps_price",
+            {"medicamento": medicamento},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def check_cmed_ceiling(
@@ -625,9 +763,17 @@ def create_mcp_server() -> FastMCP:
             medicamento: Nome ou codigo do medicamento
             preco_proposto: Preco a ser verificado
         """
-        return await _tools.check_cmed_ceiling(
+        start = time.time()
+        result = await _tools.check_cmed_ceiling(
             medicamento, preco_proposto
         )
+        audit_log(
+            "check_cmed_ceiling",
+            {"medicamento": medicamento, "preco": preco_proposto},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     @server.tool()
     async def get_anp_price(
@@ -642,17 +788,77 @@ def create_mcp_server() -> FastMCP:
             municipio: Nome do municipio
             estado: UF
         """
-        return await _tools.get_anp_price(
+        start = time.time()
+        result = await _tools.get_anp_price(
             combustivel,
             municipio=municipio,
             estado=estado,
         )
+        audit_log(
+            "get_anp_price",
+            {"combustivel": combustivel, "municipio": municipio},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
+
+    @server.tool()
+    async def get_sicro_price(
+        codigo: str,
+        estado: str = "MG",
+    ) -> dict:
+        """Consulta preco de composicao SICRO.
+
+        Args:
+            codigo: Codigo SICRO da composicao
+            estado: UF para referencia de precos
+        """
+        start = time.time()
+        result = await _tools.get_sicro_price(
+            codigo, estado=estado
+        )
+        audit_log(
+            "get_sicro_price",
+            {"codigo": codigo, "estado": estado},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
+
+    @server.tool()
+    async def search_sicro(
+        termo: str,
+        estado: str = "MG",
+        limite: int = 10,
+    ) -> dict:
+        """Busca composicoes SICRO por descricao.
+
+        Args:
+            termo: Texto para busca
+            estado: UF de referencia
+            limite: Maximo de resultados
+        """
+        start = time.time()
+        result = await _tools.search_sicro(
+            termo, estado=estado, limite=limite
+        )
+        audit_log(
+            "search_sicro",
+            {"termo": termo, "estado": estado},
+            result,
+            (time.time() - start) * 1000,
+        )
+        return result
 
     return server
 
 
 def main():
     """Inicia o MCP server via stdio."""
+    from tools.logging_config import configure_logging
+    configure_logging(
+        log_file="logs/mcp_server.jsonl",
+    )
     server = create_mcp_server()
     server.run(transport="stdio")
 

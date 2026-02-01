@@ -12,6 +12,7 @@ Usage:
 """
 
 import asyncio
+import csv
 import json
 import os
 import subprocess
@@ -439,6 +440,264 @@ def test_http_utils():
     return results
 
 
+async def test_anp_client():
+    """Test ANP client CSV parsing and search."""
+    from tools.anp_client import ANPClient
+    from tools.http_utils import CachedHTTPClient
+    import tempfile
+
+    results = []
+
+    # Create test CSV with ANP-style data
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False,
+        encoding="latin-1",
+    ) as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "COMBUSTIVEL", "MUNICIPIO", "ESTADO",
+            "PRECO_REVENDA", "BANDEIRA", "DATA_COLETA",
+            "NOME_POSTO",
+        ])
+        writer.writerow([
+            "GASOLINA COMUM", "EXTREMA", "MG",
+            "5,89", "BRANCA", "2026-01-25", "POSTO A",
+        ])
+        writer.writerow([
+            "GASOLINA COMUM", "EXTREMA", "MG",
+            "5,95", "SHELL", "2026-01-25", "POSTO B",
+        ])
+        writer.writerow([
+            "DIESEL S10", "EXTREMA", "MG",
+            "6,15", "BRANCA", "2026-01-25", "POSTO C",
+        ])
+        tmp_path = f.name
+
+    http = CachedHTTPClient()
+    client = ANPClient(
+        municipio="EXTREMA", estado="MG", http=http,
+    )
+    client.load_from_csv(tmp_path)
+
+    # T19: CSV loaded correctly
+    if client._loaded and len(client._registros) == 3:
+        results.append(result_line(
+            "T19-anp-csv-load", PASS,
+            f"records={len(client._registros)}",
+        ))
+    else:
+        results.append(result_line(
+            "T19-anp-csv-load", FAIL,
+        ))
+
+    # T20: search returns results
+    postos = client.search_postos(
+        "GASOLINA COMUM", "EXTREMA",
+    )
+    if len(postos) == 2:
+        results.append(result_line(
+            "T20-anp-search", PASS,
+        ))
+    else:
+        results.append(result_line(
+            "T20-anp-search", FAIL,
+            f"found={len(postos)}",
+        ))
+
+    # T21: price summary structure
+    resumo = client.get_precos("GASOLINA COMUM", "EXTREMA")
+    if (
+        resumo
+        and resumo.n_postos == 2
+        and resumo.media > 0
+    ):
+        results.append(result_line(
+            "T21-anp-price-summary", PASS,
+            f"media={resumo.media}",
+        ))
+    else:
+        results.append(result_line(
+            "T21-anp-price-summary", FAIL,
+        ))
+
+    os.unlink(tmp_path)
+    await http.close()
+    return results
+
+
+async def test_sicro_client():
+    """Test SICRO client CSV parsing and search."""
+    from tools.sicro_client import SICROClient
+    from tools.http_utils import CachedHTTPClient
+    import tempfile
+
+    results = []
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False,
+        encoding="latin-1",
+    ) as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow([
+            "CODIGO", "DESCRICAO", "UNIDADE",
+            "PRECO UNITARIO",
+        ])
+        writer.writerow([
+            "5914242", "ESCAVACAO MECANICA", "M3", "8,45",
+        ])
+        writer.writerow([
+            "4011631", "TRANSPORTE LOCAL MATERIAL",
+            "TKM", "1,20",
+        ])
+        writer.writerow([
+            "5914315", "COMPACTACAO DE ATERRO",
+            "M3", "5,60",
+        ])
+        tmp_path = f.name
+
+    http = CachedHTTPClient()
+    client = SICROClient(estado="MG", http=http)
+    client.load_from_csv(tmp_path)
+
+    # T22: CSV loaded
+    comp = client.get_composicao("5914242")
+    if comp and comp.preco_unitario == 8.45:
+        results.append(result_line(
+            "T22-sicro-csv-load", PASS,
+            f"code=5914242 price={comp.preco_unitario}",
+        ))
+    else:
+        results.append(result_line(
+            "T22-sicro-csv-load", FAIL,
+        ))
+
+    # T23: search by description
+    found = client.search_composicoes("COMPACTACAO")
+    if len(found) == 1 and found[0].codigo == "5914315":
+        results.append(result_line(
+            "T23-sicro-search", PASS,
+        ))
+    else:
+        results.append(result_line(
+            "T23-sicro-search", FAIL,
+            f"found={len(found)}",
+        ))
+
+    # T24: composition structure
+    comp2 = client.get_composicao("4011631")
+    if (
+        comp2
+        and comp2.unidade == "TKM"
+        and comp2.estado == "MG"
+    ):
+        results.append(result_line(
+            "T24-sicro-structure", PASS,
+        ))
+    else:
+        results.append(result_line(
+            "T24-sicro-structure", FAIL,
+        ))
+
+    os.unlink(tmp_path)
+    await http.close()
+    return results
+
+
+async def test_e2e_workflows():
+    """End-to-end workflow tests."""
+    from tools.procurement_mcp_server import ProcurementTools
+    from tools.sinapi_client import SINAPIClient
+    from tools.sicro_client import SICROClient
+    from tools.anp_client import ANPClient
+
+    results = []
+    tools = ProcurementTools()
+
+    # T25: Multi-source clients are all instantiated
+    has_sinapi = isinstance(tools.sinapi, SINAPIClient)
+    has_sicro = isinstance(tools.sicro, SICROClient)
+    has_anp = isinstance(tools.anp, ANPClient)
+    if has_sinapi and has_sicro and has_anp:
+        results.append(result_line(
+            "T25-multi-source-clients", PASS,
+        ))
+    else:
+        results.append(result_line(
+            "T25-multi-source-clients", FAIL,
+            f"sinapi={has_sinapi} sicro={has_sicro} "
+            f"anp={has_anp}",
+        ))
+
+    # T26: Source + citation round-trip
+    r = tools.validate_source("BR-FED-0001")
+    if r.get("valid") and r.get("source", {}).get("nome"):
+        source = r["source"]
+        citation = (
+            f"[Fonte: {source['id']} | {source['nome']} "
+            f"| Art. 23 | "
+            f"{source['status'].capitalize()}]"
+        )
+        if (
+            "BR-FED-0001" in citation
+            and "Lei 14.133" in citation
+        ):
+            results.append(result_line(
+                "T26-citation-round-trip", PASS,
+            ))
+        else:
+            results.append(result_line(
+                "T26-citation-round-trip", FAIL,
+                citation,
+            ))
+    else:
+        results.append(result_line(
+            "T26-citation-round-trip", FAIL, str(r),
+        ))
+
+    # T27: Audit logging works
+    from tools.logging_config import audit_log, AUDIT_LOG_PATH
+    import tempfile
+    import json as _json
+
+    # Use a temp file to avoid polluting real logs
+    old_path = AUDIT_LOG_PATH
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".jsonl", delete=False,
+    )
+    tmp.close()
+    import tools.logging_config as lc
+    lc.AUDIT_LOG_PATH = Path(tmp.name)
+
+    audit_log(
+        "test_tool", {"key": "val"}, {"success": True}, 1.5,
+    )
+
+    content = Path(tmp.name).read_text()
+    lc.AUDIT_LOG_PATH = old_path
+    os.unlink(tmp.name)
+
+    try:
+        entry = _json.loads(content.strip())
+        if (
+            entry.get("tool") == "test_tool"
+            and entry.get("duration_ms") == 1.5
+        ):
+            results.append(result_line(
+                "T27-audit-logging", PASS,
+            ))
+        else:
+            results.append(result_line(
+                "T27-audit-logging", FAIL, str(entry),
+            ))
+    except Exception as exc:
+        results.append(result_line(
+            "T27-audit-logging", FAIL, str(exc),
+        ))
+
+    await tools.close()
+    return results
+
+
 async def main():
     print("=" * 60)
     print("Procurement System -- Evaluation Runner")
@@ -473,6 +732,18 @@ async def main():
 
     print("[7] HTTP utilities (cache, credentials)")
     all_results.extend(test_http_utils())
+    print()
+
+    print("[8] ANP client")
+    all_results.extend(await test_anp_client())
+    print()
+
+    print("[9] SICRO client")
+    all_results.extend(await test_sicro_client())
+    print()
+
+    print("[10] End-to-end workflows")
+    all_results.extend(await test_e2e_workflows())
     print()
 
     # Summary
