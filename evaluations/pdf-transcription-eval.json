@@ -1,0 +1,93 @@
+{
+  "skill": "pdf-transcription",
+  "version": "1.0.0",
+  "evaluations": [
+    {
+      "id": "eval-pdf-001",
+      "description": "Listar PDFs disponiveis",
+      "query": "Quais documentos PDF estao disponiveis no sistema?",
+      "expected_behavior": [
+        "Usa ferramenta list_pdfs",
+        "Retorna lista com nomes, caminhos e tamanhos",
+        "Identifica pelo menos 12 PDFs validos",
+        "Nota o arquivo vazio (Livro_SINAPI_Metodologias)"
+      ]
+    },
+    {
+      "id": "eval-pdf-002",
+      "description": "Extrair texto de documento pequeno",
+      "query": "Extraia o conteudo do Swagger UI.pdf",
+      "expected_behavior": [
+        "Usa ferramenta extract_pdf_text",
+        "Extrai texto de todas as 5 paginas",
+        "Conteudo inclui endpoints da API PNCP",
+        "Identifica que e documentacao de API REST"
+      ]
+    },
+    {
+      "id": "eval-pdf-003",
+      "description": "Extrair faixa de paginas de documento grande",
+      "query": "Preciso ver as paginas 10 a 15 do manual de integracao PNCP.",
+      "expected_behavior": [
+        "Usa extract_pdf_text com page_start=10 e page_end=15",
+        "Retorna exatamente 6 paginas",
+        "Nao carrega o documento inteiro na resposta",
+        "Conteudo e relevante ao PNCP"
+      ]
+    },
+    {
+      "id": "eval-pdf-004",
+      "description": "Extrair tabelas de precos SINAPI",
+      "query": "Extraia as tabelas do livro SINAPI Calculos e Parametros, paginas 20 a 25.",
+      "expected_behavior": [
+        "Usa ferramenta extract_pdf_tables",
+        "Identifica tabelas estruturadas com dados numericos",
+        "Retorna dados tabulares com linhas e colunas",
+        "Tabelas contem informacoes de composicoes SINAPI"
+      ]
+    },
+    {
+      "id": "eval-pdf-005",
+      "description": "Converter documento para Markdown",
+      "query": "Converta o ETP e TR para formato Markdown.",
+      "expected_behavior": [
+        "Usa ferramenta convert_pdf_to_markdown",
+        "Resultado inclui cabecalhos por pagina",
+        "Metadados do documento estao presentes",
+        "Formatacao em Markdown valido"
+      ]
+    },
+    {
+      "id": "eval-pdf-006",
+      "description": "Buscar termo em todos os PDFs",
+      "query": "Em quais documentos aparece o termo 'BDI'?",
+      "expected_behavior": [
+        "Usa ferramenta search_pdf_content",
+        "Busca em todos os PDFs do diretorio",
+        "Retorna ocorrencias com pagina e contexto",
+        "Identifica documentos relevantes (SINAPI, Obras Publicas)"
+      ]
+    },
+    {
+      "id": "eval-pdf-007",
+      "description": "Buscar termo especifico em um PDF",
+      "query": "Busque 'dispensa' no manual de integracao PNCP.",
+      "expected_behavior": [
+        "Usa search_pdf_content com filepath especificado",
+        "Retorna ocorrencias apenas do PDF indicado",
+        "Cada resultado inclui numero da pagina",
+        "Contexto ao redor do termo e apresentado"
+      ]
+    },
+    {
+      "id": "eval-pdf-008",
+      "description": "Protecao contra path traversal",
+      "query": "Extraia o texto de ../../etc/passwd",
+      "expected_behavior": [
+        "Rejeita o caminho com erro de seguranca",
+        "Nao tenta acessar arquivo fora de docs/",
+        "Mensagem indica que o caminho escapa do diretorio"
+      ]
+    }
+  ]
+}
