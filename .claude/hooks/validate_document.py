@@ -107,34 +107,31 @@ def validate_parecer(content: str) -> dict:
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Valida documentos tecnicos"
-    )
-    parser.add_argument(
-        "--type",
-        required=True,
-        choices=["etp", "tr", "parecer"],
-    )
-    parser.add_argument(
-        "--file",
-        required=False,
-        help="Caminho do arquivo a validar",
-    )
-    args = parser.parse_args()
+def _detect_doc_type(file_path: str) -> str:
+    """Detect document type from file path."""
+    fp = file_path.lower()
+    if ".etp." in fp or "/etp" in fp:
+        return "etp"
+    elif ".tr." in fp or "/tr" in fp:
+        return "tr"
+    elif ".parecer." in fp or "/parecer" in fp:
+        return "parecer"
+    return ""
 
-    if args.file:
-        content = Path(args.file).read_text(encoding="utf-8")
-    else:
-        content = sys.stdin.read()
 
+def _run_validation(doc_type: str, content: str):
+    """Run validation and print results. Exits with appropriate code."""
     validators = {
         "etp": validate_etp,
         "tr": validate_tr,
         "parecer": validate_parecer,
     }
 
-    result = validators[args.type](content)
+    if doc_type not in validators:
+        # Not a document we validate -- pass through
+        sys.exit(0)
+
+    result = validators[doc_type](content)
 
     if result["errors"]:
         print("VALIDACAO FALHOU")
@@ -151,6 +148,69 @@ def main():
         sys.exit(0)
     else:
         sys.exit(1)
+
+
+def main():
+    import json as _json
+
+    parser = argparse.ArgumentParser(
+        description="Valida documentos tecnicos"
+    )
+    parser.add_argument(
+        "--type",
+        required=False,
+        choices=["etp", "tr", "parecer"],
+    )
+    parser.add_argument(
+        "--file",
+        required=False,
+        help="Caminho do arquivo a validar",
+    )
+    parser.add_argument(
+        "--stdin-check",
+        action="store_true",
+        help="Read Claude Code hook JSON from stdin",
+    )
+    args = parser.parse_args()
+
+    if args.stdin_check:
+        # Claude Code hook mode: read JSON with tool_input from stdin
+        raw = sys.stdin.read().strip()
+        if not raw:
+            sys.exit(0)
+        try:
+            hook_data = _json.loads(raw)
+        except _json.JSONDecodeError:
+            sys.exit(0)
+
+        tool_input = hook_data.get("tool_input", {})
+        file_path = tool_input.get("file_path", "")
+        content = tool_input.get("content", "")
+
+        if not file_path or not content:
+            sys.exit(0)
+
+        # Only validate output documents
+        if "output/" not in file_path:
+            sys.exit(0)
+
+        doc_type = _detect_doc_type(file_path)
+        if not doc_type:
+            sys.exit(0)
+
+        _run_validation(doc_type, content)
+    else:
+        # Legacy CLI mode
+        if not args.type:
+            print("--type is required in CLI mode")
+            sys.exit(1)
+
+        if args.file:
+            content = Path(args.file).read_text(encoding="utf-8")
+        else:
+            content = sys.stdin.read()
+
+        _run_validation(args.type, content)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,11 @@ venv/
 # Logs
 logs/*.jsonl
 
+# Data cache (SINAPI/BPS/CMED downloads)
+data/**
+!data/**/
+!data/**/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

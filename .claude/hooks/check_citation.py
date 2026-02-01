@@ -65,29 +65,11 @@ def check_citations(content: str, valid_sources: set) -> dict:
     }
 
 
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Verifica citacoes em documentos"
-    )
-    parser.add_argument(
-        "--file",
-        required=True,
-        help="Caminho do arquivo a verificar",
-    )
-    args = parser.parse_args()
-
-    file_path = Path(args.file)
-    if not file_path.exists():
-        print(f"Arquivo nao encontrado: {args.file}")
-        sys.exit(1)
-
+def _run_check(content: str, file_path_str: str):
+    """Run citation check and print results."""
     # Only check markdown files
-    if file_path.suffix not in (".md", ".markdown"):
+    if not file_path_str.endswith((".md", ".markdown")):
         sys.exit(0)
-
-    content = file_path.read_text(encoding="utf-8")
 
     sources_log = os.environ.get(
         "SOURCES_LOG", "sources/sources_log.jsonl"
@@ -120,6 +102,57 @@ def main():
 
     # Citation check is advisory, does not block
     sys.exit(0)
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Verifica citacoes em documentos"
+    )
+    parser.add_argument(
+        "--file",
+        required=False,
+        help="Caminho do arquivo a verificar",
+    )
+    parser.add_argument(
+        "--stdin-check",
+        action="store_true",
+        help="Read Claude Code hook JSON from stdin",
+    )
+    args = parser.parse_args()
+
+    if args.stdin_check:
+        # Claude Code hook mode: read JSON with tool_input
+        raw = sys.stdin.read().strip()
+        if not raw:
+            sys.exit(0)
+        try:
+            hook_data = json.loads(raw)
+        except json.JSONDecodeError:
+            sys.exit(0)
+
+        tool_input = hook_data.get("tool_input", {})
+        file_path_str = tool_input.get("file_path", "")
+        content = tool_input.get("content", "")
+
+        if not file_path_str or not content:
+            sys.exit(0)
+
+        _run_check(content, file_path_str)
+    else:
+        # Legacy CLI mode
+        if not args.file:
+            print("--file is required in CLI mode")
+            sys.exit(1)
+
+        file_path = Path(args.file)
+        if not file_path.exists():
+            print(f"Arquivo nao encontrado: {args.file}")
+            sys.exit(1)
+
+        content = file_path.read_text(encoding="utf-8")
+        _run_check(content, str(file_path))
 
 
 if __name__ == "__main__":

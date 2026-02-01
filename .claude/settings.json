@@ -22,47 +22,22 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": {
-          "tool_name": "Write",
-          "file_path": "output/**/*.etp.md"
-        },
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/validate_document.py --type etp"
-          },
-          {
-            "type": "prompt",
-            "message": "Documento ETP pronto para salvamento. Deseja revisar antes de confirmar?"
-          }
-        ]
-      },
-      {
-        "matcher": {
-          "tool_name": "Write",
-          "file_path": "output/**/*.tr.md"
-        },
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/validate_document.py --type tr"
-          },
-          {
-            "type": "prompt",
-            "message": "Documento TR pronto para salvamento. Deseja revisar antes de confirmar?"
+            "command": "python .claude/hooks/validate_document.py --stdin-check"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": {
-          "tool_name": "Write"
-        },
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/check_citation.py --file $FILE_PATH"
+            "command": "python .claude/hooks/check_citation.py --stdin-check"
           }
         ]
       }
