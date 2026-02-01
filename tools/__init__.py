@@ -6,3 +6,4 @@ from tools.bps_client import BPSClient
 from tools.anp_client import ANPClient
 from tools.sicro_client import SICROClient
 from tools.procurement_mcp_server import ProcurementTools
+from tools.pdf_processor import PDFProcessor

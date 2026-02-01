@@ -9,3 +9,14 @@ httpx>=0.27.0
 
 # Excel/XLS parsing for SINAPI and CMED tables
 openpyxl>=3.1.0
+
+# --- PDF extraction and transcription ---
+
+# Primary PDF text extraction engine
+pymupdf>=1.24.0
+
+# Table-aware PDF extraction (SINAPI tables, budgets)
+pdfplumber>=0.11.0
+
+# OCR wrapper for scanned documents (requires tesseract-ocr)
+pytesseract>=0.3.10

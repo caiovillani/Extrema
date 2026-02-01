@@ -9,6 +9,17 @@
         "SOURCES_LOG": "${workspaceFolder}/sources/sources_log.jsonl",
         "PYTHONPATH": "${workspaceFolder}"
       }
+    },
+    "pdf-tools": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "tools.pdf_mcp_server"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "DOCS_DIR": "${workspaceFolder}/docs",
+        "TRANSCRIPTIONS_DIR": "${workspaceFolder}/data/transcriptions",
+        "PYTHONPATH": "${workspaceFolder}"
+      }
     }
   }
 }
